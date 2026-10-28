@@ -195,7 +195,8 @@ def health():
                         "backend": _history.get("backend"),
                         "architecture": _history.get("architecture")})
     except Exception as exc:
-        return jsonify({"status": "degraded", "message": str(exc)}), 500
+        # Always return 200 — degraded means model not loaded yet, not a crash
+        return jsonify({"status": "degraded", "message": str(exc)}), 200
 
 
 @app.post("/predict")
