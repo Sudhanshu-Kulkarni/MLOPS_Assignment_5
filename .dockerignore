@@ -1,0 +1,14 @@
+.git
+.dvc/tmp
+.dvc/cache
+.venv
+venv
+__pycache__
+*.py[cod]
+data/raw
+data/processed
+data/features
+.DS_Store
+screenshots
+*.zip
+*.tar.gz

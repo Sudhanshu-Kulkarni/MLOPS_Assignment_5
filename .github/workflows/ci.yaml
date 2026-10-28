@@ -1,0 +1,46 @@
+name: CI
+
+on:
+  push:
+    branches:
+      - main
+      - master
+  pull_request:
+    branches:
+      - main
+      - master
+
+jobs:
+  test:
+    name: Run automated tests
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+          cache-dependency-path: requirements.txt
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Lint — syntax check all source modules
+        run: |
+          python -m py_compile src/utils.py
+          python -m py_compile src/data_collection.py
+          python -m py_compile src/data_processing.py
+          python -m py_compile src/feature_selection.py
+          python -m py_compile src/model_training.py
+          python -m py_compile src/model_evaluation.py
+          python -m py_compile src/predict.py
+          echo "All source files passed syntax check"
+
+      - name: Run test suite
+        run: python test.py

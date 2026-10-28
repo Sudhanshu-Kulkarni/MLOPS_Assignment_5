@@ -1,0 +1,71 @@
+stages:
+  data_collection:
+    cmd: python -m src.data_collection
+    deps:
+      - src/data_collection.py
+      - src/utils.py
+    params:
+      - data_collection
+      - base
+    outs:
+      - data/raw
+
+  data_processing:
+    cmd: python -m src.data_processing
+    deps:
+      - src/data_processing.py
+      - src/utils.py
+      - data/raw
+    params:
+      - data_processing
+      - base
+    outs:
+      - data/processed
+
+  feature_selection:
+    cmd: python -m src.feature_selection
+    deps:
+      - src/feature_selection.py
+      - src/utils.py
+      - data/processed
+    params:
+      - feature_selection
+      - base
+    outs:
+      - data/features
+
+  model_training:
+    cmd: python -m src.model_training
+    deps:
+      - src/model_training.py
+      - src/utils.py
+      - data/features
+    params:
+      - model_training
+      - base
+    outs:
+      - models/classifier
+      - models/training_history.json
+
+  model_evaluation:
+    cmd: python -m src.model_evaluation
+    deps:
+      - src/model_evaluation.py
+      - src/utils.py
+      - models/classifier
+      - models/training_history.json
+      - data/features
+    params:
+      - model_evaluation
+      - base
+    metrics:
+      - reports/metrics.json:
+          cache: false
+    plots:
+      - reports/confusion_matrix.csv:
+          template: confusion
+          x: actual
+          y: predicted
+    outs:
+      - reports/confusion_matrix.png
+      - reports/classification_report.txt

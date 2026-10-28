@@ -1,0 +1,13 @@
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+data/raw/
+data/processed/
+data/features/
+models/
+reports/
+.dvc/tmp/
+.dvc/cache/
+.DS_Store
+*.bak
