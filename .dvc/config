@@ -1,0 +1,4 @@
+[core]
+    remote = origin
+['remote "origin"']
+    url = s3://sudhanshu-cifar10-dvc-630690941889/dvc-storage
