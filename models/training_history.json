@@ -1,0 +1,12 @@
+{
+  "architecture": "mlp",
+  "backend": "sklearn",
+  "accuracy": [
+    0.4693
+  ],
+  "val_accuracy": [
+    0.452
+  ],
+  "epochs_ran": 34,
+  "model_path": "classifier/model.joblib"
+}
