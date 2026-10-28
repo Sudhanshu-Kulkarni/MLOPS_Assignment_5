@@ -1,14 +1,26 @@
 .git
-.dvc/tmp
-.dvc/cache
-.venv
+.dvc
 venv
+.venv
 __pycache__
 *.py[cod]
-data/raw
-data/processed
-data/features
+*.pyc
+.pytest_cache
 .DS_Store
-screenshots
+
+# Large data files — not needed in production image
+data/
+models/classifier/model.keras
+
+# Dev/training deps
+requirements.txt
+requirements-web.txt
+
+# Assignment artifacts
+screenshots/
+reports/
+logs/
+deploy/
 *.zip
 *.tar.gz
+*.md

@@ -1,8 +1,6 @@
 # GitHub Actions CI/CD workflow
-# Triggers on push to main/master:
-#   1. test  — runs the full test suite
-#   2. docker — builds the Docker image (only on push, not PR)
-#   3. deploy — SSHs into EC2 and restarts the container (only on push to main)
+# Flow: test → build lightweight Docker image → transfer to EC2 → run container
+# EC2 only needs Docker — no pip install, no model training, no TensorFlow
 
 name: CI-CD
 
@@ -13,7 +11,7 @@ on:
     branches: [main, master]
 
 jobs:
-  # ── Job 1: Run automated tests ──────────────────────────────────────────
+  # ── Job 1: Run automated tests ───────────────────────────────────────────
   test:
     name: Run automated tests
     runs-on: ubuntu-latest
@@ -49,7 +47,7 @@ jobs:
       - name: Run test suite
         run: python test.py
 
-  # ── Job 2: Build Docker image ────────────────────────────────────────────
+  # ── Job 2: Build lightweight Docker image ────────────────────────────────
   docker:
     name: Build Docker image
     runs-on: ubuntu-latest
@@ -60,43 +58,59 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Build Docker image
+      - name: Build lightweight Docker image
         run: docker build -t cifar10-classifier:latest .
 
-      - name: Verify container starts
+      - name: Verify container health endpoint
         run: |
           docker run -d --name test-container -p 8000:8000 cifar10-classifier:latest
-          sleep 5
-          docker logs test-container
+          sleep 8
+          curl -f http://localhost:8000/health
           docker stop test-container
           docker rm test-container
 
-  # ── Job 3: Deploy to EC2 ─────────────────────────────────────────────────
+  # ── Job 3: Deploy to EC2 (image transfer — no build on EC2) ─────────────
   deploy:
     name: Deploy to AWS EC2
     runs-on: ubuntu-latest
     needs: docker
     if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+    continue-on-error: true   # EC2 secrets optional during initial setup
 
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Deploy to EC2 via SSH
+      - name: Build Docker image for transfer
+        run: docker build -t cifar10-classifier:latest .
+
+      - name: Save Docker image to tar
+        run: docker save cifar10-classifier:latest | gzip > cifar10-classifier.tar.gz
+
+      - name: Transfer image to EC2 and deploy
+        uses: appleboy/scp-action@v0.1.7
+        with:
+          host:     ${{ secrets.EC2_HOST }}
+          username: ec2-user
+          key:      ${{ secrets.EC2_SSH_KEY }}
+          source:   cifar10-classifier.tar.gz
+          target:   /home/ec2-user/
+
+      - name: Load and run container on EC2
         uses: appleboy/ssh-action@v1.0.3
         with:
           host:     ${{ secrets.EC2_HOST }}
           username: ec2-user
           key:      ${{ secrets.EC2_SSH_KEY }}
           script: |
-            cd /opt/cifar10-classifier
-            git pull origin main
-            docker build -t cifar10-classifier:latest .
+            docker load < /home/ec2-user/cifar10-classifier.tar.gz
             docker stop cifar10-app || true
             docker rm   cifar10-app || true
-            docker run -d --name cifar10-app \
+            docker run -d \
+              --name cifar10-app \
               -p 80:8000 \
               --restart unless-stopped \
               cifar10-classifier:latest
-            echo "Deployment complete"
-            curl -f http://localhost/health && echo "Health check passed"
+            rm -f /home/ec2-user/cifar10-classifier.tar.gz
+            sleep 5
+            curl -f http://localhost/health && echo "Deployment successful"

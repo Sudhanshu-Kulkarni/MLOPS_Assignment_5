@@ -1,8 +1,11 @@
 """Flask web app for CIFAR-10 image classification (Docker + AWS EC2 deployment).
 
+Production model: scikit-learn Pipeline (StandardScaler + MLPClassifier).
+No TensorFlow required at inference time.
+
 Endpoints:
   GET  /          — HTML upload form
-  GET  /health    — JSON health check (verifies model loads)
+  GET  /health    — JSON health check (always HTTP 200)
   POST /predict   — accepts image file, returns JSON prediction
 """
 
@@ -25,44 +28,26 @@ from src.utils import class_names_cifar10, load_json, load_params
 
 app = Flask(__name__)
 
-# Lazy-loaded globals — populated on first request
-_selector = None
-_model    = None
-_history  = None
-_params   = None
+# Loaded once at first request
+_model   = None
+_history = None
+_params  = None
 
 
 def _load_artifacts() -> None:
-    global _selector, _model, _history, _params
+    global _model, _history, _params
     _params  = load_params()
     _history = load_json(ROOT / "models" / "training_history.json")
-
-    selector_path = ROOT / "data" / "features" / "selector.joblib"
-    _selector = joblib.load(selector_path) if selector_path.exists() else None
-
-    backend    = str(_history.get("backend", "tensorflow")).lower()
-    model_path = ROOT / "models" / _history.get("model_path", "classifier/model.keras")
-
-    if backend == "sklearn":
-        _model = joblib.load(model_path)
-    else:
-        from tensorflow.keras.models import load_model
-        _model = load_model(str(model_path))
-
-
-def _apply_selector(selector, x_flat: np.ndarray) -> np.ndarray:
-    if selector is None:
-        return x_flat
-    if isinstance(selector, tuple) and selector[0] == "pipeline":
-        _, var, kbest = selector
-        return kbest.transform(var.transform(x_flat))
-    return selector.transform(x_flat)
+    model_path = ROOT / "models" / _history.get("model_path", "classifier/model.joblib")
+    _model = joblib.load(str(model_path))
 
 
 def _preprocess(file_bytes: bytes, image_size: int) -> np.ndarray:
     img = Image.open(io.BytesIO(file_bytes)).convert("RGB")
     img = img.resize((image_size, image_size), Image.BILINEAR)
-    return np.asarray(img, dtype=np.float32) / 255.0
+    arr = np.asarray(img, dtype=np.float32) / 255.0
+    # Flatten to 1D feature vector (image_size * image_size * 3)
+    return arr.reshape(1, -1)
 
 
 def classify(file_bytes: bytes) -> dict:
@@ -70,38 +55,39 @@ def classify(file_bytes: bytes) -> dict:
         _load_artifacts()
 
     image_size = int(_params["data_processing"]["image_size"])
-    image      = _preprocess(file_bytes, image_size)           # (H, W, 3)
-    batch      = image[np.newaxis, ...]                        # (1, H, W, 3)
-    flat       = batch.reshape(1, -1)
-    features   = _apply_selector(_selector, flat)
+    x_flat     = _preprocess(file_bytes, image_size)   # (1, 3072)
+    names      = class_names_cifar10()
 
-    backend      = str(_history.get("backend", "tensorflow")).lower()
-    architecture = str(_history.get("architecture", "cnn")).lower()
-    names        = class_names_cifar10()
+    backend      = str(_history.get("backend", "sklearn")).lower()
+    architecture = str(_history.get("architecture", "mlp")).lower()
 
-    if backend == "sklearn" or architecture == "mlp":
-        pred_idx = int(_model.predict(features)[0])
-        proba    = None
-    else:
-        proba    = _model.predict(batch, verbose=0)[0]
+    if hasattr(_model, "predict_proba"):
+        proba    = _model.predict_proba(x_flat)[0]
         pred_idx = int(np.argmax(proba))
-
-    result = {
-        "predicted_class": names[pred_idx],
-        "class_index":     pred_idx,
-        "backend":         backend,
-        "architecture":    architecture,
-    }
-    if proba is not None:
-        result["confidence"] = round(float(proba[pred_idx]) * 100, 1)
-        result["top3"] = [
-            {"class": names[i], "confidence": round(float(proba[i]) * 100, 1)}
-            for i in np.argsort(proba)[::-1][:3]
-        ]
+        top3_idx = np.argsort(proba)[::-1][:3]
+        result = {
+            "predicted_class": names[pred_idx],
+            "class_index":     pred_idx,
+            "confidence":      round(float(proba[pred_idx]) * 100, 1),
+            "top3": [
+                {"class": names[i], "confidence": round(float(proba[i]) * 100, 1)}
+                for i in top3_idx
+            ],
+            "backend":      backend,
+            "architecture": architecture,
+        }
+    else:
+        pred_idx = int(_model.predict(x_flat)[0])
+        result = {
+            "predicted_class": names[pred_idx],
+            "class_index":     pred_idx,
+            "backend":         backend,
+            "architecture":    architecture,
+        }
     return result
 
 
-# ── HTML template ────────────────────────────────────────────────────────────
+# ── HTML templates ────────────────────────────────────────────────────────────
 
 HOME_HTML = """
 <!DOCTYPE html>
@@ -123,7 +109,6 @@ HOME_HTML = """
 <body>
   <h1>CIFAR-10 Image Classifier</h1>
   <p>Deployed with <strong>DVC + Docker + AWS EC2 + GitHub Actions CI/CD</strong></p>
-
   <div class="card">
     <h2>Upload an image</h2>
     <form method="post" action="/predict" enctype="multipart/form-data">
@@ -131,12 +116,10 @@ HOME_HTML = """
       <button type="submit">Classify</button>
     </form>
   </div>
-
   <div class="classes">
     <strong>CIFAR-10 classes:</strong>
     airplane, automobile, bird, cat, deer, dog, frog, horse, ship, truck
   </div>
-
   <p><a href="/health">Health check</a></p>
 </body>
 </html>
@@ -191,11 +174,14 @@ def home():
 def health():
     try:
         _load_artifacts()
-        return jsonify({"status": "ok", "message": "Model loaded successfully",
-                        "backend": _history.get("backend"),
-                        "architecture": _history.get("architecture")})
+        return jsonify({
+            "status":       "ok",
+            "message":      "Model loaded successfully",
+            "backend":      _history.get("backend"),
+            "architecture": _history.get("architecture"),
+        })
     except Exception as exc:
-        # Always return 200 — degraded means model not loaded yet, not a crash
+        # Always HTTP 200 — degraded = model not yet loaded, not a crash
         return jsonify({"status": "degraded", "message": str(exc)}), 200
 
 
@@ -208,7 +194,6 @@ def predict():
         return jsonify({"error": "Empty filename"}), 400
     try:
         result = classify(f.read())
-        # Return JSON for API calls, HTML for browser form submissions
         if request.accept_mimetypes.best == "application/json":
             return jsonify(result)
         return render_template_string(RESULT_HTML, result=result)

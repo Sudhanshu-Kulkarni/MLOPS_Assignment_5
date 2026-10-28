@@ -1,0 +1,9 @@
+# Production-only dependencies for the Flask inference server.
+# NO TensorFlow — the deployed model is a scikit-learn Pipeline (StandardScaler + MLPClassifier).
+flask>=3.0
+gunicorn>=22.0
+numpy>=1.24
+scikit-learn>=1.3
+pillow>=10.0
+joblib>=1.3
+pyyaml>=6.0
