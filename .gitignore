@@ -6,6 +6,10 @@ data/raw/
 data/processed/
 data/features/
 models/
+# Allow lightweight sklearn model artifacts to be committed
+!models/classifier/model.joblib
+!models/classifier/format.json
+!models/training_history.json
 reports/
 .dvc/tmp/
 .dvc/cache/
