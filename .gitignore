@@ -11,3 +11,4 @@ reports/
 .dvc/cache/
 .DS_Store
 *.bak
+cifar10-classifier.tar.gz
